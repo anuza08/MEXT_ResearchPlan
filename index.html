@@ -94,6 +94,30 @@
   .btn:hover { background: var(--sakura); }
   .btn.active { background: var(--gold); border-color: var(--ink); }
 
+  /* Prominent start overlay */
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 90;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255, 233, 240, 0.55);
+    backdrop-filter: blur(4px);
+    transition: opacity 0.4s ease;
+  }
+  #startOverlay.hide { opacity: 0; pointer-events: none; }
+  #startBtn {
+    padding: 22px 60px; font-size: 28px; font-weight: 900;
+    border-radius: 50px; border: 3px solid var(--ink);
+    background: linear-gradient(135deg, var(--pop), var(--gold));
+    color: #fff; cursor: pointer; font-family: inherit;
+    box-shadow: 0 12px 32px rgba(255,107,157,0.5), 6px 6px 0 var(--ink);
+    animation: pulse-start 1.8s ease-in-out infinite;
+    letter-spacing: 1px;
+  }
+  #startBtn:hover { filter: brightness(1.08); }
+  @keyframes pulse-start {
+    0%,100% { transform: scale(1); box-shadow: 0 12px 32px rgba(255,107,157,0.5), 6px 6px 0 var(--ink); }
+    50% { transform: scale(1.05); box-shadow: 0 18px 40px rgba(255,107,157,0.65), 6px 6px 0 var(--ink); }
+  }
+
   /* Auto-start tap overlay */
   #tap {
     position: fixed; inset: 0; z-index: 100;
@@ -415,26 +439,16 @@
 <body>
   <div class="petals" id="petals"></div>
 
-  <!-- Tap-to-start overlay (single click required for browser audio policy) -->
-  <div id="tap">
-    <div class="mascot">
-      <div class="kome">
-        <div class="leaf"></div><div class="body"></div>
-        <div class="eye l"></div><div class="eye r"></div>
-        <div class="blush l"></div><div class="blush r"></div>
-        <div class="mouth"></div>
-      </div>
-    </div>
-    <div class="ja">こんにちは!</div>
-    <h1>Kome-chan's <span class="pink">Big Idea</span> 🌸</h1>
-    <p>Your browser blocked autoplay. Tap anywhere once to enable sound, then sit back!</p>
-    <div class="pulse">▶  Tap to start with sound</div>
-  </div>
 
   <div class="progress" id="progress"></div>
 
+  <div id="startOverlay">
+    <button id="startBtn">▶ Start</button>
+  </div>
+
   <div class="controls">
-    <button class="btn" id="restartBtn">↻ Replay</button>
+    <button class="btn" id="restartBtn" style="display:none">↻ Replay</button>
+    <button class="btn" id="pauseBtn" style="display:none">⏸ Pause</button>
   </div>
 
   <!-- Voice settings panel -->
@@ -470,10 +484,10 @@
 
   <div class="help-tip" id="helpTip"></div>
 
-  <div id="pauseIndicator">
+  <!-- <div id="pauseIndicator">
     <div>⏸</div>
     <div class="label">PAUSED</div>
-  </div>
+  </div> -->
 
   <div class="click-hint" id="clickHint">tap anywhere to pause / resume</div>
 
@@ -792,7 +806,10 @@
   const progress = document.getElementById('progress');
   const tap = document.getElementById('tap');
   const muteBtn = document.getElementById('muteBtn');
+  const startOverlay = document.getElementById('startOverlay');
+  const startBtn = document.getElementById('startBtn');
   const restartBtn = document.getElementById('restartBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
   const editBtn = document.getElementById('editBtn');
   const downloadBtn = document.getElementById('downloadBtn');
   const voiceBtn = document.getElementById('voiceBtn');
@@ -1052,25 +1069,23 @@
 
   // -------- Start the video (called once we know audio is OK or after a tap) --------
   function startVideo() {
-    tap.classList.add('hide');
-    if (window.speechSynthesis) {
-      window.speechSynthesis.getVoices();
-      const warm = new SpeechSynthesisUtterance(' ');
-      window.speechSynthesis.speak(warm);
-    }
-    setTimeout(() => {
-      if (!chosenEnVoice) loadVoices();
-      play();
-    }, 400);
+    if (tap) tap.classList.add('hide');
+    if (startOverlay) startOverlay.classList.add('hide');
+    if (restartBtn) restartBtn.style.display = '';
+    if (pauseBtn) pauseBtn.style.display = '';
+    if (!chosenEnVoice) loadVoices();
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    play();
   }
-  tap.addEventListener('click', startVideo);
+  if (tap) tap.addEventListener('click', startVideo);
+  if (startBtn) startBtn.addEventListener('click', (e) => { e.stopPropagation(); startVideo(); });
 
   // Try to autoplay. If the browser blocks speech (Netlify, Safari, iOS,
   // Firefox without prior gesture), show the tap overlay so the user can
   // unlock audio with a single tap.
   function attemptAutoplay() {
     if (!window.speechSynthesis) {
-      tap.classList.add('hide');
+      if (tap) tap.classList.add('hide');
       play();
       return;
     }
@@ -1082,13 +1097,7 @@
     try { window.speechSynthesis.speak(test); } catch (e) {}
     setTimeout(() => {
       try { window.speechSynthesis.cancel(); } catch (e) {}
-      if (testStarted) {
-        // Autoplay works on this device — start with sound.
-        startVideo();
-      } else {
-        // Audio blocked — keep overlay visible and wait for the user's tap.
-        tap.classList.remove('hide');
-      }
+      startVideo();
     }, 700);
   }
 
@@ -1106,11 +1115,13 @@
     }
     if (currentTimeout) { clearTimeout(currentTimeout); currentTimeout = null; }
     pauseIndicator.classList.add('show');
+    if (pauseBtn) pauseBtn.textContent = '▶ Play';
   }
   function resumeVideo() {
     if (!paused) return;
     paused = false;
     pauseIndicator.classList.remove('show');
+    if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
     if (window.speechSynthesis) window.speechSynthesis.resume();
     if (pendingAdvance) {
       safetyCapStartedAt = Date.now();
@@ -1158,8 +1169,11 @@
     paused = false;
     pauseIndicator.classList.remove('show');
     progress.style.width = '0%';
+    if (pauseBtn) pauseBtn.textContent = '⏸ Pause';
     play();
   });
+
+  if (pauseBtn) pauseBtn.addEventListener('click', togglePause);
 
   if (voiceBtn) voiceBtn.addEventListener('click', () => {
     voicePanel.classList.toggle('open');
@@ -1280,7 +1294,7 @@
     const docClone = document.documentElement.cloneNode(true);
     // Strip transient classes
     docClone.querySelectorAll('.scene').forEach(el => el.classList.remove('active'));
-    docClone.querySelector('#tap').classList.remove('hide');
+    docClone.querySelector('#tap')?.classList.remove('hide');
     docClone.querySelector('#panel').classList.remove('open');
     docClone.querySelector('#voicePanel').classList.remove('open');
     docClone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
@@ -1305,12 +1319,8 @@
   });
 
   // -------- Initial state --------
-  // Show the first scene under the overlay so the page isn't blank.
+  // Show the first scene behind the overlay; audio starts only on user click.
   showScene(0);
-  // Try to autoplay. If audio is blocked (Netlify, Safari, iOS, etc.), the
-  // overlay stays visible and a single tap unlocks audio + starts playback.
-  window.addEventListener('load', () => setTimeout(attemptAutoplay, 250));
-  if (document.readyState === 'complete') setTimeout(attemptAutoplay, 250);
 
 </script>
 </body>
